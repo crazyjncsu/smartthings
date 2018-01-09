@@ -10,8 +10,8 @@ definition(
 )
 
 preferences {
-    input 'processorAuthority', 'text', title: 'Processor Endpoint', description: 'Processor endpoint in format: host[:port]', defaultValue: '192.168.1.86:80', required: true, displayDuringSetup: true
-    input 'deviceNameFormat', 'text', title: 'Device Name Format', description: 'Format of device names when added; %1$s=keypad; %2$03d=number; %3$s=engraving', defaultValue: '%3$s', required: true, displayDuringSetup: true
+    input 'processorAuthority', 'text', title: 'Processor', description: 'Processor endpoint in format: host[:port]', defaultValue: '192.168.1.86:80', required: true, displayDuringSetup: true
+    input 'deviceNameFormat', 'text', title: 'Device Name Format', description: 'Format of device names when added; %1$s=keypad; %2$03d=number; %3$s=engraving', defaultValue: '%1$s %3$s', required: true, displayDuringSetup: true
     input 'keypadFilterExpression', 'text', title: 'Keypad Filter Expression', description: 'Optional regex to filter keypads', defaultValue: '', required: false, displayDuringSetup: true
     input 'buttonFilterExpression', 'text', title: 'Button Filter Expression', description: 'Optional regex to filter buttons', defaultValue: '', required: false, displayDuringSetup: true
     input 'pollIntervalSeconds', 'number', title: 'Poll Interval in Seconds', description: 'Poll interval in seconds', defaultValue: '120', required: false, displayDuringSetup: true
@@ -59,11 +59,11 @@ def sendLutronHttpGets(requestInfos) {
 		return hubAction;
 	}
 
-    sendHubCommand(hubActions, 250);
+    sendHubCommand(hubActions, 500);
 }
 
 def handleLutronHttpResponse(physicalgraph.device.HubResponse response) {
-    def requestQueryStringMap = response.requestId.split('&').collect { it.split('=') }.collectEntries { [(it[0]): it[1]] };
+    def requestQueryStringMap = response.requestId.split('&').collect { it.split('=') }.collectEntries { [(URLDecoder.decode(it[0])): URLDecoder.decode(it[1])] };
 
 	switch (response.xml?.name()) {
     	case 'Project':
@@ -107,12 +107,17 @@ def handleLutronHttpResponse(physicalgraph.device.HubResponse response) {
                     
             	it.sendEvent(name: 'switch', value: currentState);
                 
-                if (buttonNumberString == requestQueryStringMap.button && requestQueryStringMap.state != 'unspecified' && currentState != requestQueryStringMap.state) {
-					sendLutronHttpGets([
-                    	[fileBaseName:'action', queryStringMap: [keypad: requestQueryStringMap.keypad, button: buttonNumberString, action: 'press']],	
-                    	[fileBaseName:'action', queryStringMap: [keypad: requestQueryStringMap.keypad, button: buttonNumberString, action: 'release']],
-                        [fileBaseName:'leds', queryStringMap: requestQueryStringMap],
-                    ]);
+                if (buttonNumberString == requestQueryStringMap.button && requestQueryStringMap.state != 'unspecified') {
+					def attempts = requestQueryStringMap.attempts ? requestQueryStringMap.attempts.toInteger() : 0;
+					log.info("keypad: ${requestQueryStringMap.keypad}; button: $buttonNumberString; currentState: $currentState; desiredState: ${requestQueryStringMap.state}; attempts: $attempts");
+                    attempts++;
+
+					if (currentState != requestQueryStringMap.state && attempts < 5)
+                        sendLutronHttpGets([
+                            [fileBaseName:'action', queryStringMap: [keypad: requestQueryStringMap.keypad, button: buttonNumberString, action: 'press']],	
+                            [fileBaseName:'action', queryStringMap: [keypad: requestQueryStringMap.keypad, button: buttonNumberString, action: 'release']],
+                            [fileBaseName:'leds', queryStringMap: [keypad: requestQueryStringMap.keypad, button: requestQueryStringMap.button, state: requestQueryStringMap.state, attempts: attempts.toString() ]],
+                        ]);
                 }
             }
             
