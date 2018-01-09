@@ -18,16 +18,16 @@ preferences {
 }
 
 def installed() {
-	initialize();
+    initialize();
 }
 
 def updated() {
-	unsubscribe();
-	initialize();
+    unsubscribe();
+    initialize();
 }
 
 def uninstalled() {
-	getChildDevices().each { deleteChildDevice(it.deviceNetworkId); }
+    getChildDevices().each { deleteChildDevice(it.deviceNetworkId); }
 }
 
 def initialize() {
@@ -35,12 +35,12 @@ def initialize() {
 }
 
 def runSyncDevicesLoop() {
-	sendLutronHttpGets([[fileBaseName: 'keypads', queryStringMap: [sync:'1']]]);
+    sendLutronHttpGets([[fileBaseName: 'keypads', queryStringMap: [sync:'1']]]);
     runIn(pollIntervalSeconds, runSyncDevicesLoop);
 }
 
 def sendLutronHttpGets(requestInfos) {
-	def hubActions = requestInfos.collect {
+    def hubActions = requestInfos.collect {
         def hubAction = new physicalgraph.device.HubAction(
             [
                 method: 'GET',
@@ -53,11 +53,11 @@ def sendLutronHttpGets(requestInfos) {
         );
 
         hubAction.requestId = it.queryStringMap.collect { "${URLEncoder.encode(it.key)}=${URLEncoder.encode(it.value)}" }.join('&');
-		
-		log.info("sendLutronHttpGet: ${hubAction.toString().split('\n')[0]}");
+        
+        log.info("sendLutronHttpGet: ${hubAction.toString().split('\n')[0]}");
 
-		return hubAction;
-	}
+        return hubAction;
+    }
 
     sendHubCommand(hubActions, 500);
 }
@@ -65,22 +65,22 @@ def sendLutronHttpGets(requestInfos) {
 def handleLutronHttpResponse(physicalgraph.device.HubResponse response) {
     def requestQueryStringMap = response.requestId.split('&').collect { it.split('=') }.collectEntries { [(URLDecoder.decode(it[0])): URLDecoder.decode(it[1])] };
 
-	switch (response.xml?.name()) {
-    	case 'Project':
-        	def matchingKeypadNodes = response.xml?.HWKeypad?.findAll { keypadFilterExpression == null || it.Name.text() =~ keypadFilterExpression };
-        	def keypadAddressSet = matchingKeypadNodes.collect { it.Address.text() }.toSet();
+    switch (response.xml?.name()) {
+        case 'Project':
+            def matchingKeypadNodes = response.xml?.HWKeypad?.findAll { keypadFilterExpression == null || it.Name.text() =~ keypadFilterExpression };
+            def keypadAddressSet = matchingKeypadNodes.collect { it.Address.text() }.toSet();
         
-        	getAllChildDevices().findAll { !keypadAddressSet.contains(it.deviceNetworkId.split(':')[0]) }.each { deleteChildDevice(it.deviceNetworkId) };
+            getAllChildDevices().findAll { !keypadAddressSet.contains(it.deviceNetworkId.split(':')[0]) }.each { deleteChildDevice(it.deviceNetworkId) };
             
             sendLutronHttpGets(matchingKeypadNodes.collect { [fileBaseName: 'buttons', queryStringMap: [keypad: it.Address.text(), name: it.Name.text()]] });
             
-        	break;
-    	case 'List':
-        	def matchingButtonNodes = response.xml?.Button?.findAll { it.Type.text() == 'LED' && it.Engraving.text() }.findAll { buttonFilterExpression == null || it.Engraving.text() =~ buttonFilterExpression };
-        	def buttonNumberSet = matchingButtonNodes.collect { it.Number.text() }.toSet();
+            break;
+        case 'List':
+            def matchingButtonNodes = response.xml?.Button?.findAll { it.Type.text() == 'LED' && it.Engraving.text() }.findAll { buttonFilterExpression == null || it.Engraving.text() =~ buttonFilterExpression };
+            def buttonNumberSet = matchingButtonNodes.collect { it.Number.text() }.toSet();
 
-			getAllChildDevices().findAll { it.deviceNetworkId.split(':')[0] == requestQueryStringMap.keypad && !buttonNumberSet.contains(it.deviceNetworkId.split(':')[1]) }.each { deleteChildDevice(it.deviceNetworkId) };
-        	
+            getAllChildDevices().findAll { it.deviceNetworkId.split(':')[0] == requestQueryStringMap.keypad && !buttonNumberSet.contains(it.deviceNetworkId.split(':')[1]) }.each { deleteChildDevice(it.deviceNetworkId) };
+            
             matchingButtonNodes.each {
                 def deviceNetworkId = requestQueryStringMap.keypad + ':' + it.Number.text();
                 def deviceName = String.format(deviceNameFormat, requestQueryStringMap.name, it.Number.text().toInteger(), it.Engraving.text());
@@ -88,33 +88,33 @@ def handleLutronHttpResponse(physicalgraph.device.HubResponse response) {
                 def nameChanged = existingChildDevice != null && !existingChildDevice.name.equals(deviceName);
 
                 if (nameChanged)
-                	deleteChildDevice(deviceNetworkId);
+                    deleteChildDevice(deviceNetworkId);
 
                 if (existingChildDevice == null || nameChanged)
                     addChildDevice('erocm123', 'Switch Child Device', deviceNetworkId, null, [name: deviceName, label: deviceName]);
             }
         
-			if (matchingButtonNodes.size() != 0)
-				sendLutronHttpGets([[fileBaseName:'leds', queryStringMap: requestQueryStringMap]]);	
+            if (matchingButtonNodes.size() != 0)
+                sendLutronHttpGets([[fileBaseName:'leds', queryStringMap: requestQueryStringMap]]);    
 
-			break;
-    	case 'LED':
-        	def ledsString = response.xml?.LEDs.text();
+            break;
+        case 'LED':
+            def ledsString = response.xml?.LEDs.text();
             
-        	getAllChildDevices().findAll { it.deviceNetworkId.split(':')[0] == requestQueryStringMap.keypad }.each {
-            	def buttonNumberString = it.deviceNetworkId.split(':')[1];
+            getAllChildDevices().findAll { it.deviceNetworkId.split(':')[0] == requestQueryStringMap.keypad }.each {
+                def buttonNumberString = it.deviceNetworkId.split(':')[1];
                 def currentState = ledsString.charAt(buttonNumberString.toInteger()) == '1' ? 'on' : 'off';
                     
-            	it.sendEvent(name: 'switch', value: currentState);
+                it.sendEvent(name: 'switch', value: currentState);
                 
                 if (buttonNumberString == requestQueryStringMap.button && requestQueryStringMap.state != 'unspecified') {
-					def attempts = requestQueryStringMap.attempts ? requestQueryStringMap.attempts.toInteger() : 0;
-					log.info("keypad: ${requestQueryStringMap.keypad}; button: $buttonNumberString; currentState: $currentState; desiredState: ${requestQueryStringMap.state}; attempts: $attempts");
+                    def attempts = requestQueryStringMap.attempts ? requestQueryStringMap.attempts.toInteger() : 0;
+                    log.info("keypad: ${requestQueryStringMap.keypad}; button: $buttonNumberString; currentState: $currentState; desiredState: ${requestQueryStringMap.state}; attempts: $attempts");
                     attempts++;
 
-					if (currentState != requestQueryStringMap.state && attempts < 5)
+                    if (currentState != requestQueryStringMap.state && attempts < 5)
                         sendLutronHttpGets([
-                            [fileBaseName:'action', queryStringMap: [keypad: requestQueryStringMap.keypad, button: buttonNumberString, action: 'press']],	
+                            [fileBaseName:'action', queryStringMap: [keypad: requestQueryStringMap.keypad, button: buttonNumberString, action: 'press']],    
                             [fileBaseName:'action', queryStringMap: [keypad: requestQueryStringMap.keypad, button: buttonNumberString, action: 'release']],
                             [fileBaseName:'leds', queryStringMap: [keypad: requestQueryStringMap.keypad, button: requestQueryStringMap.button, state: requestQueryStringMap.state, attempts: attempts.toString() ]],
                         ]);
@@ -123,24 +123,24 @@ def handleLutronHttpResponse(physicalgraph.device.HubResponse response) {
             
             break;
         case 'Action':
-        	// don't care here, as an leds was always issued after this one
-        	break;
+            // don't care here, as an leds was always issued after this one
+            break;
     }
 }
 
 def childOn(childDeviceNetworkId) {
-	setChildDeviceState(childDeviceNetworkId, 'on');
+    setChildDeviceState(childDeviceNetworkId, 'on');
 }
 
 def childOff(childDeviceNetworkId) {
-	setChildDeviceState(childDeviceNetworkId, 'off');
+    setChildDeviceState(childDeviceNetworkId, 'off');
 }
 
 def childRefresh(childDeviceNetworkId) {
-	setChildDeviceState(childDeviceNetworkId, 'unspecified');
+    setChildDeviceState(childDeviceNetworkId, 'unspecified');
 }
 
 def setChildDeviceState(childDeviceNetworkId, state) {
-	// check that the state of the leds to make sure we even have to press the button to achieve the desired state
-	sendLutronHttpGets([[fileBaseName: 'leds', queryStringMap: [ keypad: childDeviceNetworkId.split(':')[0], button: childDeviceNetworkId.split(':')[1], state: state ]]]);	
+    // check that the state of the leds to make sure we even have to press the button to achieve the desired state
+    sendLutronHttpGets([[fileBaseName: 'leds', queryStringMap: [ keypad: childDeviceNetworkId.split(':')[0], button: childDeviceNetworkId.split(':')[1], state: state ]]]);    
 }
