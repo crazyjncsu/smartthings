@@ -372,19 +372,11 @@ def listPlaces() {
     
     def places = result.data.places
     state.places = places
-    
-    // If there is a place called "Home" use it as the default
-    def defaultPlace = places.find{it.name=="Home"}
-    def defaultPlaceId
-    if (defaultPlace) {
-    	defaultPlaceId = defaultPlace.id
-    	log.debug "Place = $defaultPlace.name, Id=$defaultPlace.id"
-    }
        
     dynamicPage(name: "listPlacesPage", title: "Life360 Places", nextPage: null, uninstall: uninstallOption, install:false) {
-        section("Select Life360 Place to Match Current Location:") {
-            paragraph "Please select the ONE Life360 Place that matches your SmartThings location: ${location.name}"
-        	input "place", "enum", multiple: false, required:true, title:"Life360 Places: ", options: places.collectEntries{[it.id, it.name]}, defaultValue: defaultPlaceId
+        section("Select Life360 Places:") {
+            paragraph "Please select the Life360 Places:"
+        	input "selectedPlaceIds", "enum", multiple: true, required:true, title:"Life360 Places: ", options: places.collectEntries{[it.id, it.name]}
         }
     }
     
@@ -437,10 +429,12 @@ def installed() {
     // log.debug "Users: ${settings.users}"
     
     settings.users.each {memberId->
+    settings.selectedPlaceIds.each {placeId->
     
     	// log.debug "Find by Member Id = ${memberId}"
     
     	def member = state.members.find{it.id==memberId}
+    	def place = state.places.find{it.id==placeId}
         
         // log.debug "After Find Attempt."
 
@@ -451,7 +445,7 @@ def installed() {
        	// create the device
         if (member) {
         
-       		def childDevice = addChildDevice("smartthings", "Life360 User", "${app.id}.${member.id}",null,[name:member.firstName, completedSetup: true])
+       		def childDevice = addChildDevice("smartthings", "Life360 User", "${app.id}.${memberId}.${placeId}",null,[name:member.firstName + " " + place.name, completedSetup: true])
         
         	// save the memberId on the device itself so we can find easily later
         	// childDevice.setMemberId(member.id)
@@ -459,7 +453,7 @@ def installed() {
         	if (childDevice)
         	{
         		// log.debug "Child Device Successfully Created"
- 				generateInitialEvent (member, childDevice)
+ 				generateInitialEvent (member, place, childDevice)
 			
             	// build the icon name form the L360 Avatar URL
                 // URL Format: https://www.life360.com/img/user_images/b4698717-1f2e-4b7a-b0d4-98ccfb4e9730/Maddie_Hagins_51d2eea2019c7.jpeg
@@ -484,6 +478,7 @@ def installed() {
                 } 
        		}
     	}
+    }
     }
     
     createCircleSubscription()
@@ -562,8 +557,9 @@ def updated() {
     // loop through selected users and try to find child device for each
     
     settings.users.each {memberId->
+    settings.selectedPlaceIds.each {placeId->
     
-    	def externalId = "${app.id}.${memberId}"
+    	def externalId = "${app.id}.${memberId}.${placeId}"
 
 		// find the appropriate child device based on my app id and the device network id
 
@@ -574,19 +570,20 @@ def updated() {
     		// log.debug "Find by Member Id = ${memberId}"
     
     		def member = state.members.find{it.id==memberId}
+    		def place = state.places.find{it.id==placeId}
         
         	// log.debug "After Find Attempt."
 
         	// log.debug "External Id=${app.id}:${member.id}"
        
        		// create the device
-       		def childDevice = addChildDevice("smartthings", "Life360 User", "${app.id}.${member.id}",null,[name:member.firstName, completedSetup: true])
+       		def childDevice = addChildDevice("smartthings", "Life360 User", externalId,null,[name:member.firstName + " " + place.name, completedSetup: true])
             // childDevice.setMemberId(member.id)
         
         	if (childDevice)
         	{
         		// log.debug "Child Device Successfully Created"
- 				generateInitialEvent (member, childDevice)
+ 				generateInitialEvent (member, place, childDevice)
                 
                 // build the icon name form the L360 Avatar URL
                 // URL Format: https://www.life360.com/img/user_images/b4698717-1f2e-4b7a-b0d4-98ccfb4e9730/Maddie_Hagins_51d2eea2019c7.jpeg
@@ -614,10 +611,12 @@ def updated() {
           	// log.debug "Find by Member Id = ${memberId}"
     
     		def member = state.members.find{it.id==memberId}
+		def place = state.places.find{it.id==placeId}
     
-        	generateInitialEvent (member, deviceWrapper)
+        	generateInitialEvent (member, place, deviceWrapper)
             
         }
+    }
     }
 
 	// Now remove any existing devices that represent users that are no longer selected
@@ -637,32 +636,27 @@ def updated() {
         log.debug "Strings = ${splitStrings}"
         
         def childMemberId = splitStrings[1]
+        def childPlaceId = splitStrings[2]
         
         log.debug "Child Member Id = ${childMemberId}"
         
         log.debug "Settings.users = ${settings.users}"
         
-        if (!settings.users.find{it==childMemberId}) {
+        if (!settings.users.find{it==childMemberId} || !settings.selectedPlaceIds.find{it==childPlaceId}) {
             deleteChildDevice(childDevice.deviceNetworkId)
-            def member = state.members.find {it.id==memberId}
-            if (member)
-            	state.members.remove(member)
         }
     
     }
 }
 
-def generateInitialEvent (member, childDevice) {
+def generateInitialEvent (member, place, childDevice) {
 
     // lets figure out if the member is currently "home" (At the place)
     
     try { // we are going to just ignore any errors
     
-    	log.info "Life360 generateInitialEvent($member, $childDevice)"
+    	log.info "Life360 generateInitialEvent($member, $place, $childDevice)"
         
-        def place = state.places.find{it.id==settings.place}
-        
-        if (place) {
         
         	def memberLatitude = new Float (member.location.latitude)
             def memberLongitude = new Float (member.location.longitude)
@@ -692,7 +686,6 @@ def generateInitialEvent (member, childDevice) {
         
         	// log.debug "After generating presence event."
             
-    	}
         
 	}
     catch (e) {
@@ -733,11 +726,9 @@ def placeEventHandler() {
     def direction = params?.direction
     def timestamp = params?.timestamp
     
-    if (placeId == settings.place) {
-
 		def presenceState = (direction=="in")
     
-		def externalId = "${app.id}.${userId}"
+		def externalId = "${app.id}.${userId}.${placeId}"
 
 		// find the appropriate child device based on my app id and the device network id
 
@@ -752,6 +743,5 @@ def placeEventHandler() {
    		else {
     		log.warn "Life360 couldn't find child device associated with inbound Life360 event."
     	}
-    }
 
 }
