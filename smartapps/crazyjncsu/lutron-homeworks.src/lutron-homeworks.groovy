@@ -14,7 +14,8 @@ preferences {
     input 'deviceNameFormat', 'text', title: 'Device Name Format', description: 'Format of device names when added; %1$s=keypad; %2$03d=number; %3$s=engraving', defaultValue: '%1$s %3$s', required: true, displayDuringSetup: true
     input 'keypadFilterExpression', 'text', title: 'Keypad Filter Expression', description: 'Optional regex to filter keypads', defaultValue: '', required: false, displayDuringSetup: true
     input 'buttonFilterExpression', 'text', title: 'Button Filter Expression', description: 'Optional regex to filter buttons', defaultValue: '', required: false, displayDuringSetup: true
-    input 'pollIntervalSeconds', 'number', title: 'Poll Interval in Seconds', description: 'Poll interval in seconds', defaultValue: '120', required: false, displayDuringSetup: true
+    input 'devicePollIntervalSeconds', 'number', title: 'Device poll Interval in Seconds', description: 'Device poll interval in seconds', defaultValue: '3600', required: false, displayDuringSetup: true
+    input 'statusPollIntervalSeconds', 'number', title: 'Status poll Interval in Seconds', description: 'Status poll interval in seconds', defaultValue: '5', required: false, displayDuringSetup: true
 }
 
 def installed() {
@@ -32,11 +33,17 @@ def uninstalled() {
 
 def initialize() {
     runSyncDevicesLoop();
+    runSyncStatusLoop();
 }
 
 def runSyncDevicesLoop() {
     sendLutronHttpGets([[fileBaseName: 'keypads', queryStringMap: [sync:'1']]]);
-    runIn(pollIntervalSeconds, runSyncDevicesLoop);
+    runIn(devicePollIntervalSeconds, runSyncDevicesLoop);
+}
+
+def runSyncStatusLoop() {
+    sendLutronHttpGets(getAllChildDevices().collect { it.deviceNetworkId.split(':')[0] }.unique().collect { [fileBaseName:'leds', queryStringMap: [keypad: it]] });
+    runIn(statusPollIntervalSeconds, runSyncStatusLoop);
 }
 
 def sendLutronHttpGets(requestInfos) {
