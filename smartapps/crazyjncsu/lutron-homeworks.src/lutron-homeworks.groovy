@@ -14,8 +14,8 @@ preferences {
     input 'deviceNameFormat', 'text', title: 'Device Name Format', description: 'Format of device names when added; %1$s=keypad; %2$03d=number; %3$s=engraving', defaultValue: '%1$s %3$s', required: true, displayDuringSetup: true
     input 'keypadFilterExpression', 'text', title: 'Keypad Filter Expression', description: 'Optional regex to filter keypads', defaultValue: '', required: false, displayDuringSetup: true
     input 'buttonFilterExpression', 'text', title: 'Button Filter Expression', description: 'Optional regex to filter buttons', defaultValue: '', required: false, displayDuringSetup: true
-    input 'devicePollIntervalSeconds', 'number', title: 'Device poll Interval in Seconds', description: 'Device poll interval in seconds', defaultValue: '3600', required: false, displayDuringSetup: true
-    input 'statusPollIntervalSeconds', 'number', title: 'Status poll Interval in Seconds', description: 'Status poll interval in seconds', defaultValue: '5', required: false, displayDuringSetup: true
+    input 'devicePollIntervalSeconds', 'number', title: 'Device Poll Interval in Seconds', description: 'Device poll interval in seconds', defaultValue: '3600', required: false, displayDuringSetup: true
+    input 'statusPollIntervalSeconds', 'number', title: 'Status Poll Interval in Seconds', description: 'Status poll interval in seconds', defaultValue: '5', required: false, displayDuringSetup: true
 }
 
 def installed() {
@@ -23,6 +23,7 @@ def installed() {
 }
 
 def updated() {
+	unschedule();
     unsubscribe();
     initialize();
 }
@@ -37,13 +38,13 @@ def initialize() {
 }
 
 def runSyncDevicesLoop() {
-    sendLutronHttpGets([[fileBaseName: 'keypads', queryStringMap: [sync:'1']]]);
     runIn(devicePollIntervalSeconds, runSyncDevicesLoop);
+    sendLutronHttpGets([[fileBaseName: 'keypads', queryStringMap: [sync:'1']]]);
 }
 
 def runSyncStatusLoop() {
-    sendLutronHttpGets(getAllChildDevices().collect { it.deviceNetworkId.split(':')[0] }.unique().collect { [fileBaseName:'leds', queryStringMap: [keypad: it]] });
     runIn(statusPollIntervalSeconds, runSyncStatusLoop);
+    sendLutronHttpGets(getAllChildDevices().collect { it.deviceNetworkId.split(':')[0] }.unique().collect { [fileBaseName:'leds', queryStringMap: [keypad: it]] });
 }
 
 def sendLutronHttpGets(requestInfos) {
@@ -66,7 +67,7 @@ def sendLutronHttpGets(requestInfos) {
         return hubAction;
     }
 
-    sendHubCommand(hubActions, 500);
+    sendHubCommand(hubActions, 400);
 }
 
 def handleLutronHttpResponse(physicalgraph.device.HubResponse response) {
@@ -149,5 +150,5 @@ def childRefresh(childDeviceNetworkId) {
 
 def setChildDeviceState(childDeviceNetworkId, state) {
     // check that the state of the leds to make sure we even have to press the button to achieve the desired state
-    sendLutronHttpGets([[fileBaseName: 'leds', queryStringMap: [ keypad: childDeviceNetworkId.split(':')[0], button: childDeviceNetworkId.split(':')[1], state: state ]]]);    
+    sendLutronHttpGets([[fileBaseName: 'leds', queryStringMap: [keypad: childDeviceNetworkId.split(':')[0], button: childDeviceNetworkId.split(':')[1], state: state]]]);    
 }
