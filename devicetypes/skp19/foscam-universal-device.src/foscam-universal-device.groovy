@@ -453,9 +453,13 @@ def parse(String description) {
     def descMap = parseDescriptionAsMap(description)
 
     //Image
-	if (descMap["bucket"] && descMap["key"]) {
-		putImageInS3(descMap)
-	}
+    if (descMap.tempImageKey) {
+        try {
+            storeTemporaryImage(descMap.tempImageKey, java.util.UUID.randomUUID().toString().replaceAll('-', ''))
+        } catch (Exception e) {
+            log.error e
+        }
+    }
 
 	//Status Polling
     else if (descMap["headers"] && descMap["body"]) {
