@@ -417,13 +417,6 @@ private getLogin() {
 }
 
 private hubGet(def apiCommand) {
-	//Setting Network Device Id
-    def iphex = convertIPtoHex(ip)
-    def porthex = convertPortToHex(port)
-    device.deviceNetworkId = "$iphex:$porthex"
-    log.debug "Device Network Id set to ${iphex}:${porthex}"
-
-	log.debug("Executing hubaction on " + getHostAddress())
     def uri = ""
     if(hdcamera == true) {
     	uri = "/cgi-bin/CGIProxy.fcgi?" + getLogin() + apiCommand
@@ -431,25 +424,23 @@ private hubGet(def apiCommand) {
     else {
     	uri = apiCommand + getLogin()
     }
-    log.debug uri
     def hubAction = new physicalgraph.device.HubAction(
     	method: "GET",
         path: uri,
-        headers: [HOST:getHostAddress()]
+        headers: [HOST:"${ip}:${port}"]
     )
     if(device.currentValue("hubactionMode") == "s3") {
         hubAction.options = [outputMsgToS3:true]
         sendEvent(name: "hubactionMode", value: "local");
     }
-	hubAction
+    log.debug hubAction
+	return hubAction
 }
 
 //Parse events into attributes
 def parse(String description) {
 	log.debug "Parsing '${description}'"
 
-    def map = [:]
-    def retResult = []
     def descMap = parseDescriptionAsMap(description)
 
     //Image
@@ -509,47 +500,4 @@ def parseDescriptionAsMap(description) {
 		def nameAndValue = param.split(":")
 		map += [(nameAndValue[0].trim()):nameAndValue[1].trim()]
 	}
-}
-
-def putImageInS3(map) {
-
-	def s3ObjectContent
-
-	try {
-		def imageBytes = getS3Object(map.bucket, map.key + ".jpg")
-
-		if(imageBytes)
-		{
-			s3ObjectContent = imageBytes.getObjectContent()
-			def bytes = new ByteArrayInputStream(s3ObjectContent.bytes)
-			storeImage(getPictureName(), bytes)
-		}
-	}
-	catch(Exception e) {
-		log.error e
-	}
-	finally {
-		//Explicitly close the stream
-		if (s3ObjectContent) { s3ObjectContent.close() }
-	}
-}
-
-private getPictureName() {
-  def pictureUuid = java.util.UUID.randomUUID().toString().replaceAll('-', '')
-  "image" + "_$pictureUuid" + ".jpg"
-}
-
-private getHostAddress() {
-	return "${ip}:${port}"
-}
-
-private String convertIPtoHex(ipAddress) {
-    String hex = ipAddress.tokenize( '.' ).collect {  String.format( '%02x', it.toInteger() ) }.join()
-    return hex
-
-}
-
-private String convertPortToHex(port) {
-	String hexport = port.toString().format( '%04x', port.toInteger() )
-    return hexport
 }
