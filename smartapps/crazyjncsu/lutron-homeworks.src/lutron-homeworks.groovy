@@ -14,8 +14,8 @@ preferences {
     input 'deviceNameFormat', 'text', title: 'Device Name Format', description: 'Format of device names when added; %1$s=keypad; %2$03d=number; %3$s=engraving', defaultValue: '%1$s %3$s', required: true, displayDuringSetup: true
     input 'keypadFilterExpression', 'text', title: 'Keypad Filter Expression', description: 'Optional regex to filter keypads', defaultValue: '', required: false, displayDuringSetup: true
     input 'buttonFilterExpression', 'text', title: 'Button Filter Expression', description: 'Optional regex to filter buttons', defaultValue: '', required: false, displayDuringSetup: true
-    input 'devicePollIntervalSeconds', 'number', title: 'Device Poll Interval in Seconds', description: 'Device poll interval in seconds', defaultValue: '3600', required: false, displayDuringSetup: true
-    input 'statusPollIntervalSeconds', 'number', title: 'Status Poll Interval in Seconds', description: 'Status poll interval in seconds', defaultValue: '5', required: false, displayDuringSetup: true
+    input 'statusPollIntervalSeconds', 'number', title: 'Status Poll Interval in Seconds', defaultValue: '5', required: false, displayDuringSetup: true
+	input 'pressAttemptCount', 'number', title: 'Number of Attempts to Toggle an LED', defaultValue: '1', required: false, displayDuringSetup: true
 }
 
 def installed() {
@@ -23,7 +23,7 @@ def installed() {
 }
 
 def updated() {
-	unschedule();
+    unschedule();
     unsubscribe();
     initialize();
 }
@@ -33,18 +33,31 @@ def uninstalled() {
 }
 
 def initialize() {
-    runSyncDevicesLoop();
+	performHourlyProcessing();
+    runEvery1Hour(performHourlyProcessing);
     runSyncStatusLoop();
 }
 
-def runSyncDevicesLoop() {
-    runIn(devicePollIntervalSeconds, runSyncDevicesLoop);
+def performHourlyProcessing() {
+	// sync devices
     sendLutronHttpGets([[fileBaseName: 'keypads', queryStringMap: [sync:'1']]]);
+    
+    // invalidate cache just in case something somehow got out of sync
+    // cache is used to avoid calls to getAllChildDevices that we suppose is expensive because they decided to log the call; it's at least noisy
+    state.cachedKeypadIDs = null;
+    state.cachedKeypadLedsStringMap = null;
+    
+    // we really should be able to just run this once in initialize, but we lose the loop sometimes otherwise
+    runSyncStatusLoop();
 }
 
 def runSyncStatusLoop() {
     runIn(statusPollIntervalSeconds, runSyncStatusLoop);
-    sendLutronHttpGets(getAllChildDevices().collect { it.deviceNetworkId.split(':')[0] }.unique().collect { [fileBaseName:'leds', queryStringMap: [keypad: it]] });
+    
+    if (!state.cachedKeypadIDs)
+    	state.cachedKeypadIDs = getAllChildDevices().collect { it.deviceNetworkId.split(':')[0] }.unique();
+    
+    sendLutronHttpGets(state.cachedKeypadIDs.collect { [fileBaseName:'leds', queryStringMap: [keypad: it]] });
 }
 
 def sendLutronHttpGets(requestInfos) {
@@ -62,7 +75,7 @@ def sendLutronHttpGets(requestInfos) {
 
         hubAction.requestId = it.queryStringMap.collect { "${URLEncoder.encode(it.key)}=${URLEncoder.encode(it.value)}" }.join('&');
         
-        log.info("sendLutronHttpGet: ${hubAction.toString().split('\n')[0]}");
+        //log.info("sendLutronHttpGet: ${hubAction.toString().split('\n')[0]}");
 
         return hubAction;
     }
@@ -93,40 +106,46 @@ def handleLutronHttpResponse(physicalgraph.device.HubResponse response) {
                 def deviceNetworkId = requestQueryStringMap.keypad + ':' + it.Number.text();
                 def deviceName = String.format(deviceNameFormat, requestQueryStringMap.name, it.Number.text().toInteger(), it.Engraving.text());
                 def existingChildDevice = getChildDevice(deviceNetworkId);
-                def nameChanged = existingChildDevice != null && !existingChildDevice.name.equals(deviceName);
 
-                if (nameChanged)
-                    deleteChildDevice(deviceNetworkId);
-
-                if (existingChildDevice == null || nameChanged)
-                    addChildDevice('erocm123', 'Switch Child Device', deviceNetworkId, null, [name: deviceName, label: deviceName]);
+				if (existingChildDevice == null)
+                    addChildDevice('erocm123', 'Switch Child Device', deviceNetworkId, null, [name: deviceName]);
+                else if (existingChildDevice.name != deviceName)
+                    existingChildDevice.name = deviceName;
             }
         
             if (matchingButtonNodes.size() != 0)
-                sendLutronHttpGets([[fileBaseName:'leds', queryStringMap: requestQueryStringMap]]);    
+                sendLutronHttpGets([[fileBaseName: 'leds', queryStringMap: requestQueryStringMap]]);    
+
+            state.cachedKeypadIDs = null;
 
             break;
         case 'LED':
             def ledsString = response.xml?.LEDs.text();
             
-            getAllChildDevices().findAll { it.deviceNetworkId.split(':')[0] == requestQueryStringMap.keypad }.each {
-                def buttonNumberString = it.deviceNetworkId.split(':')[1];
-                def currentState = ledsString.charAt(buttonNumberString.toInteger()) == '1' ? 'on' : 'off';
-                    
-                it.sendEvent(name: 'switch', value: currentState);
-                
-                if (buttonNumberString == requestQueryStringMap.button && requestQueryStringMap.state != 'unspecified') {
-                    def attempts = requestQueryStringMap.attempts ? requestQueryStringMap.attempts.toInteger() : 0;
-                    log.info("keypad: ${requestQueryStringMap.keypad}; button: $buttonNumberString; currentState: $currentState; desiredState: ${requestQueryStringMap.state}; attempts: $attempts");
-                    attempts++;
+            if (!state.cachedKeypadLedsStringMap)
+            	state.cachedKeypadLedsStringMap = [:];
 
-                    if (currentState != requestQueryStringMap.state && attempts < 5)
-                        sendLutronHttpGets([
-                            [fileBaseName:'action', queryStringMap: [keypad: requestQueryStringMap.keypad, button: buttonNumberString, action: 'press']],    
-                            [fileBaseName:'action', queryStringMap: [keypad: requestQueryStringMap.keypad, button: buttonNumberString, action: 'release']],
-                            [fileBaseName:'leds', queryStringMap: [keypad: requestQueryStringMap.keypad, button: requestQueryStringMap.button, state: requestQueryStringMap.state, attempts: attempts.toString() ]],
-                        ]);
+            if (requestQueryStringMap.state || state.cachedKeypadLedsStringMap[requestQueryStringMap.keypad] != ledsString) {
+                getAllChildDevices().findAll { it.deviceNetworkId.split(':')[0] == requestQueryStringMap.keypad }.each {
+                    def buttonNumberString = it.deviceNetworkId.split(':')[1];
+                    def currentState = ledsString.charAt(buttonNumberString.toInteger()) == '1' ? 'on' : 'off';
+
+                    it.sendEvent(name: 'switch', value: currentState);
+
+                    if (buttonNumberString == requestQueryStringMap.button && requestQueryStringMap.state != 'unspecified') {
+                        def attempts = requestQueryStringMap.attempts ? requestQueryStringMap.attempts.toInteger() : 0;
+                        log.info("keypad: ${requestQueryStringMap.keypad}; button: $buttonNumberString; currentState: $currentState; desiredState: ${requestQueryStringMap.state}; attempts: $attempts");
+
+                        if (currentState != requestQueryStringMap.state && attempts++ < pressAttemptCount)
+                            sendLutronHttpGets([
+                                [fileBaseName: 'action', queryStringMap: [keypad: requestQueryStringMap.keypad, button: buttonNumberString, action: 'press']],    
+                                [fileBaseName: 'action', queryStringMap: [keypad: requestQueryStringMap.keypad, button: buttonNumberString, action: 'release']],
+                                [fileBaseName: 'leds', queryStringMap: [keypad: requestQueryStringMap.keypad, button: requestQueryStringMap.button, state: requestQueryStringMap.state, attempts: attempts.toString() ]],
+                            ]);
+                    }
                 }
+                
+                state.cachedKeypadLedsStringMap[requestQueryStringMap.keypad] = ledsString;
             }
             
             break;
