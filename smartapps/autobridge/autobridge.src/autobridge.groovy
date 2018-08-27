@@ -106,6 +106,9 @@ def processLocationEvent(event) {
 
         def containerID = lanMessage.ssdpUSN.split(':')[1]
         getContainerHostMap()[containerID] = lanMessage.networkAddress
+    } else if (lanMessage?.json?.autoBridgeOperation == "setValidationKey") {
+    	// TODO implement
+        getContainerValidationKeyMap()
     } else if (lanMessage?.json?.autoBridgeOperation == "syncSources") {
         def sourceIDs = lanMessage.json.sourceIDs.toSet()
 
