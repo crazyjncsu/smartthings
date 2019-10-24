@@ -108,7 +108,7 @@ def handleLutronHttpResponse(physicalgraph.device.HubResponse response) {
                 def existingChildDevice = getChildDevice(deviceNetworkId);
 
 				if (existingChildDevice == null)
-                    addChildDevice('erocm123', 'Switch Child Device', deviceNetworkId, null, [name: deviceName]);
+                    addChildDevice('erocm123', 'Switch Child Device', deviceNetworkId, null, [name: deviceName, completedSetup: true]);
                 else if (existingChildDevice.name != deviceName)
                     existingChildDevice.name = deviceName;
             }

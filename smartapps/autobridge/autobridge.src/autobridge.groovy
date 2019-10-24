@@ -13,6 +13,8 @@ preferences {
     section {
         input "actuators", "capability.actuator", multiple: true
         input "sensors", "capability.sensor", multiple: true
+        input "containerID", "text", title: "ID of container to add"
+        input "containerValidationKey", "text", title: "Validation key for container to add"
     }
 }
 
@@ -30,6 +32,9 @@ def uninstalled() {
 }
 
 def initialize() {
+	if (containerID != null)
+    	getContainerValidationKeyStringMap()[containerID] = containerValidationKey
+
     subscribe(location, null, processLocationEvent, [filterEvents: false])
 
 	sensors
@@ -46,7 +51,11 @@ def initialize() {
 
 def searchForDevices() {
     log.info "Searching for devices..."
+    
     sendHubCommand(new physicalgraph.device.HubAction("lan discovery urn:schemas-upnp-org:device:AutoBridge:1", physicalgraph.device.Protocol.LAN))
+    
+    // doesn't work yet, but we'll leave it here in case it's supported in the future, as it is most reliable with android
+    //sendHubCommand(new physicalgraph.device.HubAction("lan discovery mdns/dns-sd _autobridge._tcp.", physicalgraph.device.Protocol.LAN))
 }
 
 def parseDniPath(deviceNetworkId) {
@@ -72,9 +81,9 @@ def getContainerHostMap() {
     return state.containerHostMap
 }
 
-def getContainerValidationKeyMap() {
-    if (state.containerValidationKeyMap == null) state.containerValidationKeyMap = [:]
-    return state.containerValidationKeyMap
+def getContainerValidationKeyStringMap() {
+    if (state.containerValidationKeyStringMap == null) state.containerValidationKeyStringMap = [:]
+    return state.containerValidationKeyStringMap
 }
 
 def getPropertyNameValueMap(device) {
@@ -83,8 +92,7 @@ def getPropertyNameValueMap(device) {
 
 def tryDeleteChildDevice(deviceNetworkId) {
 	try {
-    	// TODO fix
-		deleteChildDevice(it.device.deviceNetworkId)
+		deleteChildDevice(deviceNetworkId)
     } catch (ex) {
     	log.error("Error deleting child device '${deviceNetworkId}': ${ex}")
     }
@@ -92,10 +100,10 @@ def tryDeleteChildDevice(deviceNetworkId) {
 
 def processDeviceEvent(event) {
 	getSubscribeEventsMap()
-            .collect()
-            .findAll { it.value > new Date().getTime() }
-            .each { log.info("Sending event to '${it.key}' from '${event.device.name}'; '${event.name}': '${event.value}'") }
-            .each { sendMessage(it.key, [deviceID: event.device.deviceNetworkId, propertyName: event.name, propertyValue: event.value]) }
+        .collect()
+        .findAll { it.value > new Date().getTime() }
+        .each { log.info("Sending event to '${it.key}' from '${event.device.name}'; '${event.name}': '${event.value}'") }
+        .each { sendMessage(it.key, [deviceID: event.device.deviceNetworkId, propertyName: event.name, propertyValue: event.value]) }
 }
 
 def processLocationEvent(event) {
@@ -106,104 +114,132 @@ def processLocationEvent(event) {
 
         def containerID = lanMessage.ssdpUSN.split(':')[1]
         getContainerHostMap()[containerID] = lanMessage.networkAddress
-    } else if (lanMessage?.json?.autoBridgeOperation == "setValidationKey") {
-    	// TODO implement
-        getContainerValidationKeyMap()
-    } else if (lanMessage?.json?.autoBridgeOperation == "syncSources") {
-        def sourceIDs = lanMessage.json.sourceIDs.toSet()
+    } else if (lanMessage?.mdnsPath) {
+        log.info("Processing MDNS message from ${lanMessage.networkAddress}...")
+        
+        log.info("RECEIVED MDNS, NEED TO IMPLEMENT")
+    } else if (lanMessage?.json?.autoBridgeOperation != null) {
+    	def containerID = lanMessage.header.split()[1].split('/').last()
+        def operation = lanMessage?.json?.autoBridgeOperation
+        
+        if (containerID == null || containerID.length() < 20) // TODO remove
+        {
+        	containerID = lanMessage.json.containerID ?: lanMessage.json.targetID
+        }
+        else
+        {
+        	def validationKeyString = getContainerValidationKeyStringMap()[containerID]
+            
+            if (validationKeyString != null) {
+                def dateString = lanMessage.headers["Date"]
+                def date = Date.parse("EEE, dd MMM yyyy HH:mm:ss z", dateString)
+                
+                if (Math.abs(date.getTime() - new Date().getTime()) > 60000)
+                	throw new Exception("Date is out of valid range")
+            
+        		def providedSignatureString = lanMessage.headers["Authorization"]
+                def actualSignatureString = computeSignatureString(validationKeyString, lanMessage.headers["Date"], lanMessage.body)
+                
+                //log.info("providedSignatureString: ${providedSignatureString}, actualSignatureString: ${actualSignatureString}")
+                
+                if (providedSignatureString != actualSignatureString)
+                	throw new Exception("Signature is not valid")
+            }
+        }
 
-        log.info("Syncing device sources from '${lanMessage.json.containerID ?: lanMessage.json.targetID}' for ${sourceIDs.size()} sources...")
+        if (operation == "syncSources") {
+            def sourceIDs = lanMessage.json.sourceIDs.toSet()
 
-        getChildDeviceInfos()
-                .findAll { it.path.targetContainerID == (lanMessage.json.containerID ?: lanMessage.json.targetID) }
+            log.info("Syncing device sources from '${containerID}' for ${sourceIDs.size()} sources...")
+
+            getChildDeviceInfos()
+                .findAll { it.path.targetContainerID == containerID }
                 .findAll { !sourceIDs.contains(it.path.sourceContainerID) }
                 .each { tryDeleteChildDevice(it.device.deviceNetworkId) }
 
-        searchForDevices()
-    } else if (lanMessage?.json?.autoBridgeOperation == "syncSourceDevices") {
-        def existingDeviceIDChildDeviceMap = getChildDeviceInfos()
-                .findAll { it.path.targetContainerID == (lanMessage.json.containerID ?: lanMessage.json.targetID) && it.path.sourceContainerID == lanMessage.json.sourceID }
+            searchForDevices()
+        } else if (operation == "syncSourceDevices") {
+            def existingDeviceIDChildDeviceMap = getChildDeviceInfos()
+                .findAll { it.path.targetContainerID == containerID && it.path.sourceContainerID == lanMessage.json.sourceID }
                 .collectEntries { [(it.path.deviceID): it.device] }
 
-        def deviceIDs = lanMessage.json.devices.collect { it.deviceID }.toSet()
+            def deviceIDs = lanMessage.json.devices.collect { it.deviceID }.toSet()
 
-        log.info("Syncing devices from '${lanMessage.json.containerID ?: lanMessage.json.targetID}' for ${deviceIDs.size()} devices...")
+            log.info("Syncing devices from '${containerID}' for ${deviceIDs.size()} devices...")
 
-        existingDeviceIDChildDeviceMap
+            existingDeviceIDChildDeviceMap
                 .findAll { !deviceIDs.contains(it.key) }
                 .each { tryDeleteChildDevice(it.value.deviceNetworkId) }
 
-        lanMessage.json.devices.each {
-            def existingChildDevice = existingDeviceIDChildDeviceMap[it.deviceID]
+            lanMessage.json.devices.each {
+                def existingChildDevice = existingDeviceIDChildDeviceMap[it.deviceID]
 
-            if (existingChildDevice == null) {
-                addChildDevice(it.namespace, it.typeName, (lanMessage.json.containerID ?: lanMessage.json.targetID) + ':' + lanMessage.json.sourceID + ':' + it.deviceID, null, [name: it.name, label: it.name])
-            } else if (existingChildDevice.name != it.name) {
-                if (existingChildDevice.name == existingChildDevice.label)
-                    existingChildDevice.label = it.name
+                if (existingChildDevice == null) {
+                    addChildDevice(it.namespace, it.typeName, containerID + ':' + lanMessage.json.sourceID + ':' + it.deviceID, null, [name: it.name, label: it.name, completedSetup: true])
+                } else if (existingChildDevice.name != it.name) {
+                    if (existingChildDevice.name == existingChildDevice.label)
+                    	existingChildDevice.label = it.name
 
-                existingChildDevice.name = it.name
+                    existingChildDevice.name = it.name
+                }
             }
-        }
-    } else if (lanMessage?.json?.autoBridgeOperation == "syncDeviceState") {
-        def childDevice = getChildDevice((lanMessage.json.containerID ?: lanMessage.json.targetID) + ':' + lanMessage.json.sourceID + ':' + lanMessage.json.deviceID);
+        } else if (operation == "syncDeviceState") {
+            def childDevice = getChildDevice(containerID + ':' + lanMessage.json.sourceID + ':' + lanMessage.json.deviceID);
 
-        log.info("Syncing state from '${lanMessage.json.containerID ?: lanMessage.json.targetID}' for device '${lanMessage.json.deviceID}' (${childDevice?.name}); setting property '${lanMessage.json.propertyName}' to '${lanMessage.json.propertyValue}'...")
+            log.info("Syncing state from '${containerID}' for device '${lanMessage.json.deviceID}' (${childDevice?.name}); setting property '${lanMessage.json.propertyName}' to '${lanMessage.json.propertyValue}'...")
 
-        if (lanMessage.json.propertyName == "image" && lanMessage.json.propertyValue != "")
-            childDevice?.storeImage(
+            if (lanMessage.json.propertyName == "image" && lanMessage.json.propertyValue != "")
+                childDevice?.storeImage(
                     java.util.UUID.randomUUID().toString().replaceAll('-', ''),
                     new ByteArrayInputStream(lanMessage.json.propertyValue.decodeBase64())
-            )
-        else
-            childDevice?.sendEvent(name: lanMessage.json.propertyName, value: lanMessage.json.propertyValue)
+                )
+            else
+                childDevice?.sendEvent(name: lanMessage.json.propertyName, value: lanMessage.json.propertyValue)
 
-        // doesn't seem to care if some handlers don't implement this
-        childDevice?.onEventSent(lanMessage.json.propertyName, lanMessage.json.propertyValue);
-    } else if (lanMessage?.json?.autoBridgeOperation == "getDevices") {
-        log.info("Getting devices for '${lanMessage.json.containerID}'...")
+            // doesn't seem to care if some handlers don't implement this
+            childDevice?.onEventSent(lanMessage.json.propertyName, lanMessage.json.propertyValue);
+        } else if (operation == "getDevices") {
+            log.info("Getting devices for '${containerID}'...")
 
-        searchForDevices()
+            searchForDevices()
 
-        sendMessage(
-                lanMessage.json.containerID,
-                [
-                        devices: actuators
-                                .plus(sensors)
-                                .toSet()
-                                .collect
-                                {
-                                    [
-                                            deviceID: it.deviceNetworkId,
-                                            name: it.label ?: it.name,
-                                            capabilityNames: it.getCapabilities().collect { it.name }.toList(),
-                                            propertyNameValueMap: getPropertyNameValueMap(it)
-                                    ]
-                                }
-                ]
-        )
-    } else if (lanMessage?.json?.autoBridgeOperation == "getDeviceState") {
-        log.info("Getting device state for '${lanMessage.json.containerID}' for device '${lanMessage.json.deviceID}'...")
-
-        def assignedDevice = getAssignedDevice(lanMessage.json.deviceID)
-
-        if (assignedDevice)
             sendMessage(
-                    lanMessage.json.containerID,
-                    [
-                            deviceID: lanMessage.json.deviceID,
-                            propertyNameValueMap: getPropertyNameValueMap(assignedDevice)
-                    ]
+                containerID,
+                [
+                    devices: actuators
+                    .plus(sensors)
+                    .toSet()
+                    .collect
+                    {
+                        [
+                            deviceID: it.deviceNetworkId,
+                            name: it.label ?: it.name,
+                            capabilityNames: it.getCapabilities().collect { it.name }.toList(),
+                            propertyNameValueMap: getPropertyNameValueMap(it)
+                        ]
+                    }
+                ]
             )
-    } else if (lanMessage?.json?.autoBridgeOperation == "invokeDeviceCommand") {
-        log.info("Invoking device command for '${lanMessage.json.containerID}' for device '${lanMessage.json.deviceID}', command '${lanMessage.json.commandName}'...")
-        getAssignedDevice(lanMessage.json.deviceID)?."${lanMessage.json.commandName}"()
-    } else if (lanMessage?.json?.autoBridgeOperation == "subscribeEvents") {
-        log.info("Setting subscription for'${lanMessage.json.containerID}'...")
-        getSubscribeEventsMap()[lanMessage.json.containerID] = new Date(new Date().getTime() + lanMessage.json.expirationMillisecondCount).getTime()
-    } else {
-        // NOOP?
-        //log.info("Unhandled event: ${lanMessage}")
+        } else if (operation == "getDeviceState") {
+            log.info("Getting device state for '${containerID}' for device '${lanMessage.json.deviceID}'...")
+
+            def assignedDevice = getAssignedDevice(lanMessage.json.deviceID)
+
+            if (assignedDevice)
+                sendMessage(
+                    containerID,
+                    [
+                        deviceID: lanMessage.json.deviceID,
+                        propertyNameValueMap: getPropertyNameValueMap(assignedDevice)
+                    ]
+                )
+        } else if (operation == "invokeDeviceCommand") {
+            log.info("Invoking device command for '${containerID}' for device '${lanMessage.json.deviceID}', command '${lanMessage.json.commandName}'...")
+            getAssignedDevice(lanMessage.json.deviceID)?."${lanMessage.json.commandName}"()
+        } else if (operation == "subscribeEvents") {
+            log.info("Setting subscription for'${containerID}'...")
+            getSubscribeEventsMap()[containerID] = new Date(new Date().getTime() + lanMessage.json.expirationMillisecondCount).getTime()
+        }
     }
 }
 
@@ -221,12 +257,12 @@ def requestChildRefresh(childDeviceNetworkId) {
     sendMessage(dniPath.targetContainerID, [sourceID: dniPath.sourceContainerID, deviceID: dniPath.deviceID])
 }
 
-def computeSignatureString(validationKey, dateString, bodyString) {
-    if (validationKey == null)
+def computeSignatureString(validationKeyString, dateString, bodyString) {
+    if (validationKeyString == null)
         return "";
 
     def hmacAlgorithm = javax.crypto.Mac.getInstance("HmacSHA256")
-    hmacAlgorithm.init(new javax.crypto.spec.SecretKeySpec(validationKey, "HmacSHA256"))
+    hmacAlgorithm.init(new javax.crypto.spec.SecretKeySpec(org.apache.commons.codec.binary.Base64.decodeBase64(validationKeyString), "HmacSHA256"))
 
     def signatureSource = "$dateString$bodyString".getBytes("UTF-8")
     def signatureBytes = hmacAlgorithm.doFinal(signatureSource)
@@ -244,8 +280,10 @@ def sendMessage(containerID, message) {
     ]).toString()
     
     def host = getContainerHostMap()[containerID] + ":040B" // port 1035
+    def signatureString = computeSignatureString(getContainerValidationKeyStringMap()[containerID], dateString, bodyString)
     
-    //log.info("Sending message to '${host}': ${bodyString}")
+    //log.info("Sending message of ${bodyString.length()} chars on date '${dateString}' to '${host}': ${bodyString}")
+	//log.info("computeSignatureString(${getContainerValidationKeyStringMap()[containerID]}, ${dateString}, ${bodyString})=${signatureString}")
 
     sendHubCommand(new physicalgraph.device.HubAction([
             method: 'POST',
@@ -253,7 +291,7 @@ def sendMessage(containerID, message) {
             headers: [
                     Host: host,
                     Date: dateString,
-                    Authorization: computeSignatureString(getContainerValidationKeyMap()[containerID], dateString, bodyString),
+                    Authorization: signatureString,
             ],
             body: bodyString
     ]))
