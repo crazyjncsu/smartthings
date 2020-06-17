@@ -33,12 +33,13 @@ def uninstalled() {
 }
 
 def initialize() {
-	performHourlyProcessing();
-    runEvery1Hour(performHourlyProcessing);
-    runSyncStatusLoop();
+    runEvery1Hour(performEveryHourProcessing);
+    runEvery1Minute(performEveryMinuteProcessing);
+	performEveryHourProcessing();
+	performEveryMinuteProcessing();
 }
 
-def performHourlyProcessing() {
+def performEveryHourProcessing() {
 	// sync devices
     sendLutronHttpGets([[fileBaseName: 'keypads', queryStringMap: [sync:'1']]]);
     
@@ -46,8 +47,10 @@ def performHourlyProcessing() {
     // cache is used to avoid calls to getAllChildDevices that we suppose is expensive because they decided to log the call; it's at least noisy
     state.cachedKeypadIDs = null;
     state.cachedKeypadLedsStringMap = null;
-    
-    // we really should be able to just run this once in initialize, but we lose the loop sometimes otherwise
+}
+
+def performEveryMinuteProcessing() {
+	// if not restarted every minute, this guy tends to timeout and die
     runSyncStatusLoop();
 }
 
@@ -126,22 +129,26 @@ def handleLutronHttpResponse(physicalgraph.device.HubResponse response) {
             	state.cachedKeypadLedsStringMap = [:];
 
             if (requestQueryStringMap.state || state.cachedKeypadLedsStringMap[requestQueryStringMap.keypad] != ledsString) {
+                log.info("Keypad LEDs changed (keypad: ${requestQueryStringMap.keypad})");
+                
                 getAllChildDevices().findAll { it.deviceNetworkId.split(':')[0] == requestQueryStringMap.keypad }.each {
                     def buttonNumberString = it.deviceNetworkId.split(':')[1];
                     def currentState = ledsString.charAt(buttonNumberString.toInteger()) == '1' ? 'on' : 'off';
 
                     it.sendEvent(name: 'switch', value: currentState);
+                    log.info("Device state discovered (name: ${it.name}; currentState: $currentState)");
 
                     if (buttonNumberString == requestQueryStringMap.button && requestQueryStringMap.state != 'unspecified') {
                         def attempts = requestQueryStringMap.attempts ? requestQueryStringMap.attempts.toInteger() : 0;
-                        log.info("keypad: ${requestQueryStringMap.keypad}; button: $buttonNumberString; currentState: $currentState; desiredState: ${requestQueryStringMap.state}; attempts: $attempts");
 
-                        if (currentState != requestQueryStringMap.state && attempts++ < pressAttemptCount)
+                        if (currentState != requestQueryStringMap.state && attempts++ < pressAttemptCount) {
+                        	log.info("Sending press/release (keypad: ${requestQueryStringMap.keypad}; button: $buttonNumberString; name: ${it.name})");
                             sendLutronHttpGets([
                                 [fileBaseName: 'action', queryStringMap: [keypad: requestQueryStringMap.keypad, button: buttonNumberString, action: 'press']],    
                                 [fileBaseName: 'action', queryStringMap: [keypad: requestQueryStringMap.keypad, button: buttonNumberString, action: 'release']],
                                 [fileBaseName: 'leds', queryStringMap: [keypad: requestQueryStringMap.keypad, button: requestQueryStringMap.button, state: requestQueryStringMap.state, attempts: attempts.toString() ]],
                             ]);
+                        }
                     }
                 }
                 
