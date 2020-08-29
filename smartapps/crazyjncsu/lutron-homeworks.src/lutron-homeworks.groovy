@@ -175,6 +175,7 @@ def childRefresh(childDeviceNetworkId) {
 }
 
 def setChildDeviceState(childDeviceNetworkId, state) {
+    log.info("Setting child device state (childDeviceNetworkId: $childDeviceNetworkId; state: $state)");
     // check that the state of the leds to make sure we even have to press the button to achieve the desired state
     sendLutronHttpGets([[fileBaseName: 'leds', queryStringMap: [keypad: childDeviceNetworkId.split(':')[0], button: childDeviceNetworkId.split(':')[1], state: state]]]);    
 }
