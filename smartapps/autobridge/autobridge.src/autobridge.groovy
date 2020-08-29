@@ -207,17 +207,14 @@ def processLocationEvent(event) {
                 containerID,
                 [
                     devices: actuators
-                    .plus(sensors)
-                    .toSet()
-                    .collect
-                    {
-                        [
+                        .plus(sensors)
+                        .toSet()
+                        .collect { [
                             deviceID: it.deviceNetworkId,
                             name: it.label ?: it.name,
                             capabilityNames: it.getCapabilities().collect { it.name }.toList(),
                             propertyNameValueMap: getPropertyNameValueMap(it)
-                        ]
-                    }
+                        ] }
                 ]
             )
         } else if (operation == "getDeviceState") {
@@ -274,9 +271,9 @@ def sendMessage(containerID, message) {
     def dateString = new Date().format("EEE, dd MMM yyyy HH:mm:ss z", TimeZone.getTimeZone("UTC"))
 
     def bodyString = new groovy.json.JsonBuilder([
-            targetID: containerID,
-            containerID: containerID,
-            message: message,
+        targetID: containerID,
+        containerID: containerID,
+        message: message,
     ]).toString()
     
     def host = getContainerHostMap()[containerID] + ":040B" // port 1035
@@ -286,13 +283,13 @@ def sendMessage(containerID, message) {
 	//log.info("computeSignatureString(${getContainerValidationKeyStringMap()[containerID]}, ${dateString}, ${bodyString})=${signatureString}")
 
     sendHubCommand(new physicalgraph.device.HubAction([
-            method: 'POST',
-            path: "/container/" + containerID,
-            headers: [
-                    Host: host,
-                    Date: dateString,
-                    Authorization: signatureString,
-            ],
-            body: bodyString
+        method: 'POST',
+        path: "/container/" + containerID,
+        headers: [
+            Host: host,
+            Date: dateString,
+            Authorization: signatureString,
+        ],
+        body: bodyString
     ]))
 }
