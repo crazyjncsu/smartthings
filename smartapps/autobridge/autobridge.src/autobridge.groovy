@@ -121,30 +121,22 @@ def processLocationEvent(event) {
     } else if (lanMessage?.json?.autoBridgeOperation != null) {
     	def containerID = lanMessage.header.split()[1].split('/').last()
         def operation = lanMessage?.json?.autoBridgeOperation
-        
-        if (containerID == null || containerID.length() < 20) // TODO remove
-        {
-        	containerID = lanMessage.json.containerID ?: lanMessage.json.targetID
-        }
-        else
-        {
-        	def validationKeyString = getContainerValidationKeyStringMap()[containerID]
-            
-            if (validationKeyString != null) {
-                def dateString = lanMessage.headers["Date"]
-                def date = Date.parse("EEE, dd MMM yyyy HH:mm:ss z", dateString)
-                
-                if (Math.abs(date.getTime() - new Date().getTime()) > 60000)
-                	throw new Exception("Date is out of valid range")
-            
-        		def providedSignatureString = lanMessage.headers["Authorization"]
-                def actualSignatureString = computeSignatureString(validationKeyString, lanMessage.headers["Date"], lanMessage.body)
-                
-                //log.info("providedSignatureString: ${providedSignatureString}, actualSignatureString: ${actualSignatureString}")
-                
-                if (providedSignatureString != actualSignatureString)
-                	throw new Exception("Signature is not valid")
-            }
+        def validationKeyString = getContainerValidationKeyStringMap()[containerID]
+
+        if (validationKeyString != null) {
+            def dateString = lanMessage.headers["Date"]
+            def date = Date.parse("EEE, dd MMM yyyy HH:mm:ss z", dateString)
+
+            if (Math.abs(date.getTime() - new Date().getTime()) > 60000)
+            throw new Exception("Date is out of valid range")
+
+            def providedSignatureString = lanMessage.headers["Authorization"]
+            def actualSignatureString = computeSignatureString(validationKeyString, lanMessage.headers["Date"], lanMessage.body)
+
+            //log.info("providedSignatureString: ${providedSignatureString}, actualSignatureString: ${actualSignatureString}")
+
+            if (providedSignatureString != actualSignatureString)
+            	throw new Exception("Signature is not valid")
         }
 
         if (operation == "syncSources") {
@@ -175,12 +167,17 @@ def processLocationEvent(event) {
                 def existingChildDevice = existingDeviceIDChildDeviceMap[it.deviceID]
 
                 if (existingChildDevice == null) {
-                    addChildDevice(it.namespace, it.typeName, containerID + ':' + lanMessage.json.sourceID + ':' + it.deviceID, null, [name: it.name, label: it.name, completedSetup: true])
-                } else if (existingChildDevice.name != it.name) {
-                    if (existingChildDevice.name == existingChildDevice.label)
-                    	existingChildDevice.label = it.name
+                    addChildDevice(it.namespace, it.typeName, containerID + ':' + lanMessage.json.sourceID + ':' + it.deviceID, location.getHubs()[0].id, [name: it.name, label: it.name, completedSetup: true])
+                } else {
+                	// TODO need to test; seriously doubt this works
+                    if (existingChildDevice.name != it.name) {
+			            log.info("Renaming device '${existingChildDevice.name}' to '${it.name}'...")
 
-                    existingChildDevice.name = it.name
+						if (existingChildDevice.name == existingChildDevice.label)
+                            existingChildDevice.label = it.name
+
+                        existingChildDevice.name = it.name
+                    }
                 }
             }
         } else if (operation == "syncDeviceState") {
@@ -188,6 +185,9 @@ def processLocationEvent(event) {
 
             log.info("Syncing state from '${containerID}' for device '${lanMessage.json.deviceID}' (${childDevice?.name}); setting property '${lanMessage.json.propertyName}' to '${lanMessage.json.propertyValue}'...")
 
+			// so the event coming in to processLocationEvent gets truncated based on:
+            // https://community.smartthings.com/t/event-data-limits/154109/14
+            // we'll have to figure out another way
             if (lanMessage.json.propertyName == "image" && lanMessage.json.propertyValue != "")
                 childDevice?.storeImage(
                     java.util.UUID.randomUUID().toString().replaceAll('-', ''),
@@ -271,7 +271,6 @@ def sendMessage(containerID, message) {
     def dateString = new Date().format("EEE, dd MMM yyyy HH:mm:ss z", TimeZone.getTimeZone("UTC"))
 
     def bodyString = new groovy.json.JsonBuilder([
-        targetID: containerID,
         containerID: containerID,
         message: message,
     ]).toString()
