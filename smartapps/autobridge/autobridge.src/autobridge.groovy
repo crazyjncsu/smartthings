@@ -59,8 +59,8 @@ def searchForDevices() {
 }
 
 def parseDniPath(deviceNetworkId) {
-    def dniParts = deviceNetworkId.split(':')
-    return [targetContainerID: dniParts[0], sourceContainerID: dniParts[1], deviceID: dniParts[2]]
+    def match = (deviceNetworkId =~ /^(.*?)\:(.*?)\:(.*)$/)[0]
+    return [targetContainerID: match[1], sourceContainerID: match[2], deviceID: match[3]]
 }
 
 def getChildDeviceInfos() {
@@ -118,9 +118,9 @@ def processLocationEvent(event) {
         log.info("Processing MDNS message from ${lanMessage.networkAddress}...")
         
         log.info("RECEIVED MDNS, NEED TO IMPLEMENT")
-    } else if (lanMessage?.json?.autoBridgeOperation != null) {
+    } else if (lanMessage?.json?.operation != null) {
     	def containerID = lanMessage.header.split()[1].split('/').last()
-        def operation = lanMessage?.json?.autoBridgeOperation
+        def operation = lanMessage?.json?.operation
         def validationKeyString = getContainerValidationKeyStringMap()[containerID]
 
         if (validationKeyString != null) {
