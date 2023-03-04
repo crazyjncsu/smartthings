@@ -1,0 +1,10 @@
+name: Sound Sensor
+components:
+- id: main
+  capabilities:
+  - id: soundSensor
+    version: 1
+  - id: refresh
+    version: 1
+  categories:
+    - name: SoundSensor

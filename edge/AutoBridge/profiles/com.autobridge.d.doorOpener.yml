@@ -1,0 +1,10 @@
+name: Door Opener
+components:
+- id: main
+  capabilities:
+  - id: doorControl
+    version: 1
+  - id: refresh
+    version: 1
+  categories:
+    - name: GarageDoor

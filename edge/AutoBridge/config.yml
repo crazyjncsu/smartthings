@@ -1,0 +1,5 @@
+name: "AutoBridge"
+packageKey: "AutoBridge"
+permissions:
+  lan: {}
+  discovery: {}

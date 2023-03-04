@@ -1,0 +1,10 @@
+name: Camera
+components:
+- id: main
+  capabilities:
+  - id: imageCapture
+    version: 1
+  - id: refresh
+    version: 1
+  categories:
+    - name: Camera

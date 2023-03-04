@@ -1,0 +1,16 @@
+name: Bridge
+components:
+- id: main
+  capabilities:
+  - id: refresh
+    version: 1
+  categories:
+    - name: Bridges
+preferences:
+- name: "validationKey"
+  title: "Validation Key"
+  required: true
+  preferenceType: string
+  definition:
+    stringType: text
+    default: ""

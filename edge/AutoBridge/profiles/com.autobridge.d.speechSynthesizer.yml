@@ -1,0 +1,10 @@
+name: Speech Synthesizer
+components:
+- id: main
+  capabilities:
+  - id: speechSynthesis
+    version: 1
+  - id: refresh
+    version: 1
+  categories:
+    - name: Others
