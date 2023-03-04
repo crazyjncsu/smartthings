@@ -50,7 +50,7 @@ local driver = Driver("AutoBridge", {
             -- end)
         end,
         infoChanged = function(driver, device)
-            -- maybe post to AutoBridge?
+            updateBridges()
         end
     },
     -- maybe this is all unnecessary due to register_channel_handler?
@@ -240,58 +240,21 @@ webServer:post('/auto-bridge/:targetID', function(request, response)
 
             local capabilityID = attributeIDToCapabilityIDTable[bodyObject.propertyName]
             if capabilityID then
-                local capabilityObject = capabilities[capabilityID]
-                if capabilityObject then
-                    local attributeObject = capabilityObject[bodyObject.propertyName]
-                    if attributeObject then
-                        for _, value in pairs(attributeObject) do
-                            if value.NAME == bodyObject.propertyValue then
-                                device:emit_event(value())
+                local cachedValue, _ = device:get_latest_state('main', capabilityID, bodyObject.propertyName)
+                if cachedValue ~= bodyObject.propertyValue then
+                    local capabilityObject = capabilities[capabilityID]
+                    if capabilityObject then
+                        local attributeObject = capabilityObject[bodyObject.propertyName]
+                        if attributeObject then
+                            for _, value in pairs(attributeObject) do
+                                if value.NAME == bodyObject.propertyValue then
+                                    device:emit_event(value())
+                                end
                             end
                         end
                     end
                 end
             end
-            -- device:emit_event({
-            --     capability_id = "soundSensor",
-            --     attribute_id = bodyObject.propertyName,
-            --     component_id = "main",
-            --     state = {
-            --         value = bodyObject.propertyValue,
-            --     }
-            -- })
-
-            --     if bodyObject.propertyName == "door" and bodyObject.propertyValue == "open" then
-            --         device:emit_event(capabilities.doorControl.door.open())
-            --     elseif bodyObject.propertyName == "door" and bodyObject.propertyValue == "opening" then
-            --         device:emit_event(capabilities.doorControl.door.opening())
-            --     elseif bodyObject.propertyName == "door" and bodyObject.propertyValue == "closing" then
-            --         device:emit_event(capabilities.doorControl.door.closing())
-            --     elseif bodyObject.propertyName == "door" and bodyObject.propertyValue == "closed" then
-            --         device:emit_event(capabilities.doorControl.door.closed())
-            --     elseif bodyObject.propertyName == "sound" and bodyObject.propertyValue == "detected" then
-            --         device:emit_event(capabilities.soundSensor.sound.detected())
-            --     elseif bodyObject.propertyName == "sound" and bodyObject.propertyValue == "not detected" then
-            --         -- log.info(utils.stringify_table(capabilities.soundSensor.sound.not_detected()))
-            --         -- device:emit_event(capabilities.soundSensor.sound.not_detected())
-            --         device:emit_event(capabilities["soundSensor"]["sound"]["not_detected"]())
-            --     elseif bodyObject.propertyName == "motion" and bodyObject.propertyValue == "active" then
-            --         device:emit_event(capabilities.motionSensor.motion.active())
-            --     elseif bodyObject.propertyName == "motion" and bodyObject.propertyValue == "inactive" then
-            --         device:emit_event(capabilities.motionSensor.motion.inactive())
-            --     elseif bodyObject.propertyName == "contact" and bodyObject.propertyValue == "open" then
-            --         device:emit_event(capabilities.contactSensor.contact.open())
-            --     elseif bodyObject.propertyName == "contact" and bodyObject.propertyValue == "closed" then
-            --         device:emit_event(capabilities.contactSensor.contact.closed())
-            --     elseif bodyObject.propertyName == "alarm" and bodyObject.propertyValue == "siren" then
-            --         device:emit_event(capabilities.alarm.alarm.siren())
-            --     elseif bodyObject.propertyName == "alarm" and bodyObject.propertyValue == "off" then
-            --         device:emit_event(capabilities.alarm.alarm.off())
-            --     elseif bodyObject.propertyName == "switch" and bodyObject.propertyValue == "on" then
-            --         device:emit_event(capabilities.switch.switch.on())
-            --     elseif bodyObject.propertyName == "switch" and bodyObject.propertyValue == "off" then
-            --         device:emit_event(capabilities.switch.switch.off())
-            --     end
         end
     end
 
