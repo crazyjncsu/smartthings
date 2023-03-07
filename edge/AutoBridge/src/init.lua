@@ -50,7 +50,8 @@ local driver = Driver("AutoBridge", {
             -- end)
         end,
         infoChanged = function(driver, device)
-            updateBridges()
+            -- this seems to trigger too often
+            --updateBridges()
         end
     },
     -- maybe this is all unnecessary due to register_channel_handler?
@@ -143,7 +144,7 @@ function processSetCommand(device, propertyName, propertyValue)
         log.info("Processing set property '" .. propertyName .. "' to '" .. propertyValue .. "'...")
     end
 
-    local sourceID, deviceID = string.match(device.device_network_id, '(..+):(..+)')
+    local sourceID, deviceID = string.match(device.device_network_id, '(..-):(..+)')
     performHttpPost(device:get_parent_device(), {
         autoBridgeOperation = "syncDeviceState",
         sourceID = sourceID,
@@ -162,9 +163,11 @@ function performHttpPost(targetBridgeDevice, requestBody)
     local responseBody = {}
 
     log.debug("Using date of: " .. dateString)
+    log.debug("Using validation key of: " .. targetBridgeDevice.preferences.validationKey)
     log.debug("Calculated authorization string of: " .. authorizationString)
 
     log.info("Performing HTTP POST to: " .. url)
+    log.debug("Sending body: " .. requestBodyString)
 
     local _, code = http.request({
         method = 'POST',
@@ -203,12 +206,13 @@ driver:call_with_delay(2, updateBridges)
 driver:call_on_schedule(100, updateBridges)
 
 webServer:post('/auto-bridge/:targetID', function(request, response)
-    log.debug("Received request")
-
     -- TODO validate signature
 
-    local bodyObject = json.decode(request:get_body())
+    local bodyString = request:get_body()
+    local bodyObject = json.decode(bodyString)
     local targetBridgeDevice = driver:get_device_by_network_id(request.params.targetID)
+
+    log.debug("Received request: " .. bodyString)
 
     if targetBridgeDevice and bodyObject then
         log.info("Performing operation: " .. bodyObject.autoBridgeOperation)
