@@ -51,7 +51,7 @@ local driver = Driver("AutoBridge", {
         end,
         infoChanged = function(driver, device)
             -- this seems to trigger too often
-            --updateBridges()
+            -- updateBridges()
         end
     },
     -- maybe this is all unnecessary due to register_channel_handler?
@@ -141,7 +141,9 @@ end
 
 function processSetCommand(device, propertyName, propertyValue)
     if propertyName and propertyValue then
-        log.info("Processing set property '" .. propertyName .. "' to '" .. propertyValue .. "'...")
+        device.log.info_with({
+            hub_logs = true
+        }, "Processing set property '" .. propertyName .. "' to '" .. propertyValue .. "'...")
     end
 
     local sourceID, deviceID = string.match(device.device_network_id, '(..-):(..+)')
@@ -193,7 +195,9 @@ function updateBridges()
 
         if targetBridgeDevice then
             log.info("Setting bridge host to " .. ip)
-            targetBridgeDevice:set_field("authority", ip .. ":1035")
+            targetBridgeDevice:set_field("authority", ip .. ":1035", {
+                persist = true
+            })
             performHttpPost(targetBridgeDevice, {
                 autoBridgeOperation = "setHubAuthority",
                 hubAuthority = driver.webServer.ip .. ":" .. driver.webServer.port
@@ -215,7 +219,7 @@ webServer:post('/auto-bridge/:targetID', function(request, response)
     log.debug("Received request: " .. bodyString)
 
     if targetBridgeDevice and bodyObject then
-        log.info("Performing operation: " .. bodyObject.autoBridgeOperation)
+        log.debug("Performing operation: " .. bodyObject.autoBridgeOperation)
         if bodyObject.autoBridgeOperation == "syncSources" then
             -- sourceIDs
             -- should look for any child device with wrong source
@@ -237,10 +241,12 @@ webServer:post('/auto-bridge/:targetID', function(request, response)
             -- should look for any devices with this source that aren't in this list
             -- and delete them?
         elseif bodyObject.autoBridgeOperation == "syncDeviceState" then
-            log.info("Setting property '" .. bodyObject.propertyName .. "' to '" .. bodyObject.propertyValue .. "'...")
-
             local deviceNetworkID = bodyObject.sourceID .. ":" .. bodyObject.deviceID
             local device = driver:get_device_by_network_id(deviceNetworkID)
+
+            device.log.info_with({
+                hub_logs = true
+            }, "Setting property '" .. bodyObject.propertyName .. "' to '" .. bodyObject.propertyValue .. "'...")
 
             local capabilityID = attributeIDToCapabilityIDTable[bodyObject.propertyName]
             if capabilityID then
