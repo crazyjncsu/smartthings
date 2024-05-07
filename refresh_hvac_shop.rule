@@ -1,0 +1,15 @@
+name: "Refresh HVAC Shop Periodically"
+actions:
+  - every:
+      interval:
+        value:
+          integer: 10
+        unit: Minute
+      actions:
+        - command:
+            devices:
+              - 4dbb1ff1-58a4-4658-8a31-7d93b0497499
+            commands:
+              - component: main
+                capability: refresh
+                command: refresh
