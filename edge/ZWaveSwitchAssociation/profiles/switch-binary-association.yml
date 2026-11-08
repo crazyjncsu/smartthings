@@ -1,0 +1,18 @@
+name: switch-binary-association
+components:
+- id: main
+  capabilities:
+  - id: switch
+    version: 1
+  - id: refresh
+    version: 1
+  categories:
+    - name: Switch
+preferences:
+  - name: "group2NodeIds"
+    title: "Group 2 node IDs (hex)"
+    description: "Nodes that follow a push of this paddle. Comma-separated hex IDs, for example: 0A, 0B"
+    required: false
+    preferenceType: string
+    definition:
+      stringType: text

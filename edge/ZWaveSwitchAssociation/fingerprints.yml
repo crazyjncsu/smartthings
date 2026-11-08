@@ -1,0 +1,11 @@
+# Generic fingerprints only, so that the hub allows a switch to this driver.
+# Manufacturer fingerprints (for example, in the stock Z-Wave Switch driver) have priority when a device joins.
+zwaveGeneric:
+  - id: "GenericSwitchBinary"
+    deviceLabel: Z-Wave Switch (Association)
+    genericType: 0x10
+    deviceProfileName: switch-binary-association
+  - id: "GenericSwitchMultilevel"
+    deviceLabel: Z-Wave Dimmer (Association)
+    genericType: 0x11
+    deviceProfileName: switch-level-association

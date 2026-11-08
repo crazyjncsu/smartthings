@@ -1,0 +1,4 @@
+name: "Z-Wave Switch Association"
+packageKey: "zwave-switch-association"
+permissions:
+  zwave: {}
