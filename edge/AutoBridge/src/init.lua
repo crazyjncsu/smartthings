@@ -22,6 +22,36 @@ local attributeIDToCapabilityIDTable = {
     alarm = "alarm"
 }
 
+-- A mirror shows a source capability also as a target capability, so that Google Home and Alexa
+-- can use the device (for example, a door opener also as a contact sensor and a switch).
+-- A mirror applies to a device only if the device's profile has both capabilities.
+--   values:   source attribute value -> target attribute value (state from the bridge)
+--   commands: target attribute value -> source attribute value (commands to the bridge)
+local mirrors = {
+    {
+        source = { capability = "doorControl", attribute = "door" },
+        target = { capability = "contactSensor", attribute = "contact" },
+        values = { open = "open", opening = "open", closing = "open", closed = "closed" }
+    },
+    {
+        source = { capability = "doorControl", attribute = "door" },
+        target = { capability = "switch", attribute = "switch" },
+        values = { open = "on", opening = "on", closing = "off", closed = "off" },
+        commands = { on = "open", off = "closed" }
+    }
+}
+
+local function getDeviceMirrors(device)
+    local deviceMirrors = {}
+    for _, mirror in ipairs(mirrors) do
+        if device:supports_capability_by_id(mirror.source.capability)
+            and device:supports_capability_by_id(mirror.target.capability) then
+            table.insert(deviceMirrors, mirror)
+        end
+    end
+    return deviceMirrors
+end
+
 local webServer = luxure.Server.new()
 
 local driver = Driver("AutoBridge", {
@@ -140,6 +170,14 @@ function searchForBridges(bridgeFoundProc)
 end
 
 function processSetCommand(device, propertyName, propertyValue)
+    -- a command on a mirror target goes to the bridge as its source attribute
+    for _, mirror in ipairs(getDeviceMirrors(device)) do
+        if mirror.target.attribute == propertyName and mirror.commands and mirror.commands[propertyValue] then
+            propertyName, propertyValue = mirror.source.attribute, mirror.commands[propertyValue]
+            break
+        end
+    end
+
     if propertyName and propertyValue then
         device.log.info_with({
             hub_logs = true
@@ -263,6 +301,14 @@ webServer:post('/auto-bridge/:targetID', function(request, response)
                             end
                         end
                     end
+                end
+            end
+
+            -- also emit the target values of the mirrors whose source is this attribute
+            for _, mirror in ipairs(getDeviceMirrors(device)) do
+                local targetValue = mirror.source.attribute == bodyObject.propertyName and mirror.values[bodyObject.propertyValue]
+                if targetValue and device:get_latest_state("main", mirror.target.capability, mirror.target.attribute) ~= targetValue then
+                    device:emit_event(capabilities[mirror.target.capability][mirror.target.attribute][targetValue]())
                 end
             end
         end

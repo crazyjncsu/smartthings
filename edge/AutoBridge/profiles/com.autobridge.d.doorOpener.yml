@@ -4,6 +4,11 @@ components:
   capabilities:
   - id: doorControl
     version: 1
+  # contactSensor and switch mirror doorControl, so that Google Home and Alexa can use the door
+  - id: contactSensor
+    version: 1
+  - id: switch
+    version: 1
   - id: refresh
     version: 1
   categories:
