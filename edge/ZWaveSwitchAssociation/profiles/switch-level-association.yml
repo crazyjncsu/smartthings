@@ -8,6 +8,9 @@ components:
     version: 1
   - id: refresh
     version: 1
+  # used by the API to set and read association group 2
+  - id: execute
+    version: 1
   categories:
     - name: Switch
 preferences:

@@ -41,8 +41,8 @@ local function setProfile(device)
     device:try_update_metadata({ profile = profile })
 end
 
-local function syncAssociations(device)
-    local nodeIDs = parseNodeIDs(device.preferences.group2NodeIds)
+local function syncAssociations(device, text)
+    local nodeIDs = parseNodeIDs(text)
     device.log.info_with({ hub_logs = true }, "Setting group " .. GROUP .. " to: " .. formatNodeIDs(nodeIDs))
 
     -- an empty node list removes all nodes from the group
@@ -53,9 +53,30 @@ local function syncAssociations(device)
     device:send(Association:Get({ grouping_identifier = GROUP }))
 end
 
+-- logs the report and shows it in execute.data, so that the API can read it
 local function associationReport(driver, device, command)
+    local nodeIDs = formatNodeIDs(command.args.node_ids)
     device.log.info_with({ hub_logs = true }, string.format("Group %d has: %s (max %d)",
-        command.args.grouping_identifier, formatNodeIDs(command.args.node_ids), command.args.max_nodes_supported))
+        command.args.grouping_identifier, nodeIDs, command.args.max_nodes_supported))
+    device:emit_event(capabilities.execute.data({
+        group = command.args.grouping_identifier,
+        nodeIds = nodeIDs,
+        maxNodes = command.args.max_nodes_supported
+    }, { visibility = { displayed = false } }))
+end
+
+-- the API cannot change device settings, but it can send commands:
+--   execute("setGroup2", { nodeIds = "0C" })  or  execute("getGroup2")
+local function executeCommand(driver, device, command)
+    if command.args.command == "setGroup2" then
+        syncAssociations(device, (command.args.args or {}).nodeIds)
+    elseif command.args.command == "getGroup2" then
+        device:send(Association:Get({ grouping_identifier = GROUP }))
+    elseif command.args.command == "getGroup" then
+        device:send(Association:Get({ grouping_identifier = tonumber((command.args.args or {}).group) or 1 }))
+    elseif command.args.command == "getGroupings" then
+        device:send(Association:GroupingsGet({}))
+    end
 end
 
 local driverTemplate = {
@@ -63,6 +84,11 @@ local driverTemplate = {
         capabilities.switch,
         capabilities.switchLevel,
         capabilities.refresh
+    },
+    capability_handlers = {
+        [capabilities.execute.ID] = {
+            [capabilities.execute.commands.execute.NAME] = executeCommand
+        }
     },
     lifecycle_handlers = {
         driverSwitched = function(driver, device)
@@ -72,13 +98,16 @@ local driverTemplate = {
         infoChanged = function(driver, device, event, args)
             local oldValue = args.old_st_store.preferences.group2NodeIds
             if device.preferences.group2NodeIds ~= oldValue then
-                syncAssociations(device)
+                syncAssociations(device, device.preferences.group2NodeIds)
             end
         end
     },
     zwave_handlers = {
         [cc.ASSOCIATION] = {
-            [Association.REPORT] = associationReport
+            [Association.REPORT] = associationReport,
+            [Association.GROUPINGS_REPORT] = function(driver, device, command)
+                device.log.info_with({ hub_logs = true }, "Supported groupings: " .. command.args.supported_groupings)
+            end
         }
     }
 }
