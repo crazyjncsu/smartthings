@@ -22,6 +22,18 @@ local attributeIDToCapabilityIDTable = {
     alarm = "alarm"
 }
 
+-- attributes with a number value (the table above handles only attributes with named values)
+local numericAttributeTable = {
+    rssi = { capability = "signalStrength", unit = "dBm" }
+}
+
+-- properties the bridge sends that have no SmartThings attribute: the camera image is base64 JPEG
+-- (Edge cannot upload it), and phrase is the last phrase spoken (speechSynthesis has no attribute)
+local ignoredPropertyTable = {
+    image = true,
+    phrase = true
+}
+
 -- A mirror shows a source capability also as a target capability, so that Google Home and Alexa
 -- can use the device (for example, a door opener also as a contact sensor and a switch).
 -- A mirror applies to a device only if the device's profile has both capabilities.
@@ -228,6 +240,7 @@ function performHttpPost(targetBridgeDevice, requestBody)
 end
 
 function updateBridges()
+    -- SSDP updates the address of each bridge that answers
     searchForBridges(function(ip, targetBridgeDeviceNetworkID, bridgeName)
         local targetBridgeDevice = driver:get_device_by_network_id(targetBridgeDeviceNetworkID)
 
@@ -236,12 +249,22 @@ function updateBridges()
             targetBridgeDevice:set_field("authority", ip .. ":1035", {
                 persist = true
             })
-            performHttpPost(targetBridgeDevice, {
+        end
+    end)
+
+    -- the hub port changes when the driver starts, so send the hub address to every bridge with a known
+    -- address, also to bridges that did not answer SSDP (multicast is not reliable over Wi-Fi)
+    for _, device in ipairs(driver:get_devices()) do
+        if device:get_field("authority") then
+            local ok, err = pcall(performHttpPost, device, {
                 autoBridgeOperation = "setHubAuthority",
                 hubAuthority = driver.webServer.ip .. ":" .. driver.webServer.port
             })
+            if not ok then
+                log.warn("Could not send hub address to " .. device:get_field("authority") .. ": " .. tostring(err))
+            end
         end
-    end)
+    end
 end
 
 driver:call_with_delay(2, updateBridges)
@@ -287,6 +310,20 @@ webServer:post('/auto-bridge/:targetID', function(request, response)
             }, "Setting property '" .. bodyObject.propertyName .. "' to '" .. bodyObject.propertyValue .. "'...")
 
             local capabilityID = attributeIDToCapabilityIDTable[bodyObject.propertyName]
+            local numericAttribute = numericAttributeTable[bodyObject.propertyName]
+            if numericAttribute then
+                local value = tonumber(bodyObject.propertyValue)
+                if value then
+                    device:emit_event(capabilities[numericAttribute.capability][bodyObject.propertyName]({
+                        value = value,
+                        unit = numericAttribute.unit
+                    }))
+                end
+            elseif not capabilityID and not ignoredPropertyTable[bodyObject.propertyName] then
+                device.log.warn_with({
+                    hub_logs = true
+                }, "Unhandled property '" .. bodyObject.propertyName .. "'")
+            end
             if capabilityID then
                 local cachedValue, _ = device:get_latest_state('main', capabilityID, bodyObject.propertyName)
                 if cachedValue ~= bodyObject.propertyValue then
